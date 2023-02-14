@@ -28,16 +28,12 @@ try:  # import package that outside the tracker folder  For yolo v7
 
 except:
     pass
-import tracker_dataloader
+
 
 def set_basic_params(cfgs):
-    global CATEGORY_DICT, DATASET_ROOT, CERTAIN_SEQS, IGNORE_SEQS, YAML_DICT
+    global CATEGORY_DICT, DATASET_ROOT
     CATEGORY_DICT = cfgs['CATEGORY_DICT']
     DATASET_ROOT = cfgs['DATASET_ROOT']
-    CERTAIN_SEQS = cfgs['CERTAIN_SEQS']
-    IGNORE_SEQS = cfgs['IGNORE_SEQS']
-    YAML_DICT = cfgs['YAML_DICT']
-
 
 timer = Timer()
 seq_fps = []  # list to store time used for every seq
@@ -60,10 +56,6 @@ def tracker_custom(opts, cfgs):
     elif opts.tracker == 'strongsort':
         opts.kalman_format = 'strongsort'
 
-    # NOTE: if save video, you must save image
-    if opts.save_videos:
-        opts.save_images = True
-
     """
     1. load model
     """
@@ -72,104 +64,10 @@ def tracker_custom(opts, cfgs):
     ckpt = torch.load(opts.model_path, map_location=device)
     model = ckpt['ema' if ckpt.get('ema') else 'model'].float().fuse().eval()  # for yolo v7
 
-    # if opts.trace:
-    #     print(opts.img_size)
-    #     model = TracedModel(model, device, opts.img_size)
-    # else:
-    #     model.to(device)
-
     """
     2. load dataset and track
     """
-    # ----------------sequence inference----------------
-      # track per seq
-      # firstly, create seq list
-    if opts.track_dataset == 'seg':
-      seqs = []
-      if opts.data_format == 'yolo':
-          with open(f'{DATASET_ROOT}/test.txt', 'r') as f:
-              lines = f.readlines()
-              
-              for line in lines:
-                  elems = line.split('/')  # devide path by / in order to get sequence name(elems[-2])
-                  if elems[-2] not in seqs:
-                      seqs.append(elems[-2])
 
-      elif opts.data_format == 'origin':
-          DATA_ROOT = os.path.join(DATASET_ROOT, '/sequences')
-          seqs = os.listdir(DATA_ROOT)
-      else:
-          raise NotImplementedError
-      seqs = sorted(seqs)
-      seqs = [seq for seq in seqs if seq not in IGNORE_SEQS]
-      print(f'Seqs will be evalueated, total{len(seqs)}:')
-      print(seqs)
-
-      # secondly, for each seq, instantiate dataloader class and track
-      # every time assign a different folder to store results
-      folder_name = strftime("%Y-%d-%m %H:%M:%S", gmtime())
-      folder_name = folder_name[5:-3].replace('-', '_')
-      folder_name = folder_name.replace(' ', '_')
-      folder_name = folder_name.replace(':', '_')
-      folder_name = opts.tracker + '_' + folder_name
-
-      BaseTrack._count = 0
-
-      # --------------tracking seq {seq}--------------
-      for seq in seqs:
-
-          path = os.path.join(DATA_ROOT, seq) if opts.data_format == 'origin' else os.path.join(f'{DATASET_ROOT}', 'test.txt')
-
-          loader = tracker_dataloader.TrackerLoader(path, opts.img_size, opts.data_format, seq)
-
-          data_loader = torch.utils.data.DataLoader(loader, batch_size=1)
-
-          tracker = TRACKER_DICT[opts.tracker](opts, frame_rate=30, gamma=opts.gamma)  # instantiate tracker  TODO: finish init params
-
-          results = []  # store current seq results
-          frame_id = 0
-
-          pbar = tqdm.tqdm(desc=f"{seq}", ncols=80)
-          for i, (img, img0) in enumerate(data_loader):
-              pbar.update()
-              timer.tic()  # start timing this img
-              
-              if not i % opts.detect_per_frame:  # if it's time to detect
-                current_tracks = tracker_inference(model, tracker, img, img0, device)
-            
-              # save results
-              cur_tlwh, cur_id, cur_cls = [], [], []
-              for trk in current_tracks:
-                  
-                  bbox = trk.tlwh
-                  id = trk.track_id
-                  cls = trk.cls
-
-                  # filter low area bbox
-                  if bbox[2] * bbox[3] > opts.min_area:
-                      cur_tlwh.append(bbox)
-                      cur_id.append(id)
-                      cur_cls.append(cls)
-                      
-
-              results.append((frame_id + 1, cur_id, cur_tlwh, cur_cls))
-              timer.toc()  # end timing this image
-              
-              if opts.save_images:
-                  plot_img(img0, frame_id, [cur_tlwh, cur_id, cur_cls], save_dir=os.path.join(DATASET_ROOT, 'reuslt_images', seq))
-              frame_id += 1
-
-          seq_fps.append(i / timer.total_time)  # cal fps for current seq
-          timer.clear()  # clear for next seq
-          pbar.close()
-          # thirdly, save results
-          # every time assign a different name
-          save_results(folder_name, seq, results)
-
-          ## finally, save videos
-          if opts.save_images and opts.save_videos:
-              save_videos(seq_names=seq)
-              
     # ----------------Webcam inference----------------
     if opts.track_dataset == 'Webcam':
         tracker = TRACKER_DICT[opts.tracker](opts, frame_rate=30, gamma=opts.gamma)
@@ -236,16 +134,24 @@ def tracker_custom(opts, cfgs):
         
     # ----------------video inference----------------
     
-    if opts.track_dataset == 'Video':
+    if opts.track_dataset == 'video':
         
         tracker = TRACKER_DICT[opts.tracker](opts, frame_rate=30, gamma=opts.gamma)
         if type(opts.img_size) == int:
             width, height = opts.img_size, opts.img_size
         elif type(opts.img_size) == list or type(opts.img_size) == tuple:
             width, height = opts.img_size[0], opts.img_size[1]
-        
+            
         BaseTrack._count = 0
         cap =cv2.VideoCapture(DATASET_ROOT)
+        # fps = cap.get(cv2.CAP_PROP_FPS)
+        name = os.path.split(DATASET_ROOT)[1]
+        name = name.split('.')[0] + '.mp4'
+        vid_path = os.path.join(opts.save_path,name)
+        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        vid_writer = cv2.VideoWriter(vid_path, cv2.VideoWriter_fourcc(*'mp4v'), 30, (w, h))
+
         start_time = time.time()
         fps_counter = 0
         memory = {}
@@ -275,6 +181,7 @@ def tracker_custom(opts, cfgs):
                 current_tracks = tracker_inference(model, tracker, img, im0s, device, fps_counter)
                 
                 img_ = np.ascontiguousarray(np.copy(im0s))
+                
                 cv2.line(img_, (314,198), (591,249), (0, 0, 255), 5)
                 cv2.line(img_, (728,265-40), (1093,304-40), (0, 255, 0), 5)
             
@@ -284,7 +191,6 @@ def tracker_custom(opts, cfgs):
                 previous = memory.copy()
                 memory = {}
                 
-                cur_tlwh, cur_id, cur_cls, cur_center = [], [], [], []
                 for trk in current_tracks:
                     box = trk.tlwh # x_bottom_left, y_bottom_left, width, height
                     id = trk.track_id
@@ -308,25 +214,18 @@ def tracker_custom(opts, cfgs):
                     text = f'{CATEGORY_DICT[cls]}-{id}'
                     cv2.putText(img_, text, [int(box[0]), int(box[1])], fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1, 
                                     color=get_color(id), thickness=1)
-                    cv2.setMouseCallback('FRAME', POINTS)
+                    
                     # previous frame
                     if id in previous:
                         previous_box = previous[id]
-                        
-                        # convert tlwh to tlbr
-                        
+                    
                         previous_center = tuple([int(previous_box[0]+(previous_box[2]/2)), int(previous_box[1]+int(previous_box[3]/2))])
                         
                         color_previous = sub_img[previous_center[1], previous_center[0]]
                         # print('previous_id:',id, color_previous)
-                        
-                        # UP_south = (color_current == [0,0,255]).all() and (color_previous == [0,255,0]).all()
-                
+
                         DOWN_south = (color_previous == [0,0,255]).all() and (color_current==[0,255,0]).all()
-                        
                         UP_north = (color_current == [0,0,254]).all() and (color_previous == [0,254,0]).all()
-                        
-                        # DOWN_north = (color_previous == [0,0,254]).all() and (color_current==[0,254,0]).all()
                         
                         if DOWN_south:
                             if CATEGORY_DICT[cls]=='car':
@@ -361,20 +260,23 @@ def tracker_custom(opts, cfgs):
                     
                     cv2.putText(img_, f'truck: {truck_north}', (1120, 300), fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=2, 
                                     color=(0, 255, 0), thickness=4)
-              
+
+                if not opts.nosave:
+                    if not os.path.exists(opts.save_path):
+                        os.mkdir(opts.save_path)
+                    vid_writer.write(img_)
+      
                 cv2.imshow('',img_)
                 
                 #Show X, Y coordinate on image
                 # cv2.setMouseCallback('', POINTS)
-                
-                # Pause video
-                # cv2.setMouseCallback('', POINTS)
-                
+
                 start_time = time.time()
                 frame_id += 1
                 fps_counter = 0
             else:
                 break
+            
         cap.release()
         cv2.destroyAllWindows()
         
@@ -424,66 +326,10 @@ def plot_img(img, frame_id, results, start_time, fps_counter, save_dir=None, sho
         cv2.putText(img_, text, (tlbr[0], tlbr[1]), fontFace=cv2.FONT_HERSHEY_PLAIN, fontScale=1, 
                         color=get_color(id), thickness=1)
         
-        
         if (time.time() - start_time) != 0:
             cv2.putText(img_, "FPS{0}".format('%.1f' % (1/(time.time() - start_time))),
                         (100,50), cv2.FONT_HERSHEY_SIMPLEX, 2, (0,0,255), 3)
-            
-        # if cls
-            
-    if show_image:    
-      cv2.imshow('FRAME',img_)
-      cv2.setMouseCallback('FRAME', POINTS)
-
-def save_videos(seq_names):
-    """
-    convert imgs to a video
-    seq_names: List[str] or str, seqs that will be generated
-    """
-    if not isinstance(seq_names, list):
-        seq_names = [seq_names]
-
-    for seq in seq_names:
-        images_path = os.path.join(DATASET_ROOT, 'reuslt_images', seq)
-        images_name = sorted(os.listdir(images_path))
-
-        to_video_path = os.path.join(images_path, '../', seq + '.mp4')
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-
-        img0 = Image.open(os.path.join(images_path, images_name[0]))
-        vw = cv2.VideoWriter(to_video_path, fourcc, 15, img0.size)
-
-        for img in images_name:
-            if img.endswith('.jpg'):
-                frame = cv2.imread(os.path.join(images_path, img))
-                vw.write(frame)
-    print('Save videos Done!!')
-    
-def save_results(folder_name, seq_name, results, data_type='default'):
-    """
-    write results to txt file
-    results: list  row format: frame id, target id, box coordinate, class(optional)
-    to_file: file path(optional)
-    data_type: write data format
-    """
-    assert len(results)
-    if not data_type == 'default':
-        raise NotImplementedError 
-
-    if not os.path.exists(f'./tracker/results/{folder_name}'):
-
-        os.makedirs(f'./tracker/results/{folder_name}')
-
-    with open(os.path.join('./tracker/results', folder_name, seq_name + '.txt'), 'w') as f:
-        for frame_id, target_ids, tlwhs, clses in results:
-            if data_type == 'default':
-
-                for id, tlwh, cls in zip(target_ids, tlwhs, clses):
-                    f.write(f'{frame_id},{id},{tlwh[0]:.2f},{tlwh[1]:.2f},{tlwh[2]:.2f},{tlwh[3]:.2f},{int(cls)}\n')
-    f.close()
-
-    return folder_name
-
+ 
 def get_color(idx):
     """
     aux func for plot_seq
@@ -544,6 +390,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, default=None, help='model path')
     parser.add_argument('--trace', type=bool, default=False, help='traced model of YOLO v7')
     parser.add_argument('--img_size', type=int, default=800, help='[train, test] image sizes')
+    parser.add_argument('--save_path', type=str, default='./results', help='save root')
 
     """For tracker"""
     # model path
@@ -561,8 +408,9 @@ if __name__ == '__main__':
     parser.add_argument('--kalman_format', type=str, default='default', help='use what kind of Kalman, default, naive, strongsort or bot-sort like')
     parser.add_argument('--min_area', type=float, default=150, help='use to filter small bboxs')
     parser.add_argument('--track_dataset', type=str, default='seg', help='input source mode (video, Webcam, image)')
-    parser.add_argument('--save_videos', action='store_true', help='save tracking results (video)')
-    parser.add_argument('--save_images', action='store_true', help='save tracking results (image)')
+    parser.add_argument('--nosave', action='store_true', help='save result')
+    # parser.add_argument('--save_images', action='store_true', help='save tracking results (image)')
+    # parser.add_argument('--save_gif', action='store_true', help='save tracking results (gif)')
     
     # detect per several frames
     parser.add_argument('--detect_per_frame', type=int, default=1, help='choose how many frames per detect')    
@@ -570,7 +418,6 @@ if __name__ == '__main__':
    
     opts = parser.parse_args()
 
-    # NOTE: read path of datasets, sequences and TrackEval configs
 
     with open(opts.dataset, 'r') as f:
         cfgs = yaml.load(f, Loader=yaml.FullLoader)
