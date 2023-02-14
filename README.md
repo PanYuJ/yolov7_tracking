@@ -25,7 +25,7 @@ python train.py --workers 8 --device 0 --epochs 50 --batch-size 32 --data data/c
 ### 4. Tracking
  - Creating four color area on hidden image to detect the color of vehicle center changing (to south and to north). The demo is shown as below.
  - Hidden image (Left)
- - main image (Right)
+ - main image (Right)  
  
  <img src="/images/color area.jpg" width="400"/>   <img src="/images/main image.jpg" width="450"/>
  
