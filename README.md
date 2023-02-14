@@ -27,7 +27,7 @@ python train.py --workers 8 --device 0 --epochs 50 --batch-size 32 --data data/c
  - Hidden image (Left)
  - main image (Right)  
  
- <img src="/images/color area.jpg" width="400"/>   <img src="/images/main image.jpg" width="450"/>
+ <img src="/images/color area.jpg" width="300"/>   <img src="/images/main image.jpg" width="300"/>
  
 ```
 python tracker/tracker_custom.py --img_size 640 --tracker bytetrack --model_path your model weight --track_dataset Video  --dataset tracker/config_files/yolov7_track_custom.yaml
