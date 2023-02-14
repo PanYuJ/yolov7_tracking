@@ -32,3 +32,5 @@ python train.py --workers 8 --device 0 --epochs 50 --batch-size 32 --data data/c
 ```
 python tracker/tracker_custom.py --img_size 640 --tracker bytetrack --model_path your model weight --track_dataset Video  --dataset tracker/config_files/yolov7_track_custom.yaml
 ```
+### 5. Demo
+![gif](/images/highway-gif.gif)
